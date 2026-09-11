@@ -40,6 +40,25 @@ class CameraFailureTests(unittest.TestCase):
                      (ROOT/'data/mnist/t10k-images-idx3-ubyte.gz').exists(),
                      'Сначала обучите локальную модель: python -m numai train')
 class TrainedPipelineTests(unittest.TestCase):
+    def test_camera_reports_two_simultaneous_digits_independently(self):
+        model = MLP.load(ROOT/'models/arabic.npz')
+        images = read_idx(ROOT/'data/mnist/t10k-images-idx3-ubyte.gz')
+        labels = read_idx(ROOT/'data/mnist/t10k-labels-idx1-ubyte.gz')
+        raw = images[np.flatnonzero(labels == 7)[0]]
+        frame = np.full((480, 640, 3), 255, np.uint8)
+        for x, y in ((10, 10), (480, 310)):
+            frame[y:y+112, x:x+112] = cv2.cvtColor(255-cv2.resize(raw, (112, 112)), cv2.COLOR_GRAY2BGR)
+        camera = MagicMock()
+        camera.isOpened.return_value = True
+        camera.read.side_effect = [(True, frame.copy()) for _ in range(8)]
+        output = io.StringIO()
+        with patch('numai.camera.cv2.VideoCapture', return_value=camera), \
+                patch('numai.camera.time.sleep'), contextlib.redirect_stdout(output):
+            run_camera(model, preview=False, max_frames=8)
+        self.assertEqual(output.getvalue().count('Вижу цифру: 7'), 2)
+        self.assertIn('объект 1', output.getvalue())
+        self.assertIn('объект 2', output.getvalue())
+
     def test_camera_finds_moving_off_center_digit_and_resizes_preview(self):
         model = MLP.load(ROOT/'models/arabic.npz')
         images = read_idx(ROOT/'data/mnist/t10k-images-idx3-ubyte.gz')
@@ -65,7 +84,8 @@ class TrainedPipelineTests(unittest.TestCase):
                 patch('numai.camera.cv2.destroyAllWindows'), \
                 contextlib.redirect_stdout(output):
             run_camera(model, preview=True, max_frames=len(frames))
-        self.assertEqual(output.getvalue().count('Вижу цифру: 7'), 1)
+        # Large jumps create new tracks; each location must recognize the digit.
+        self.assertEqual(output.getvalue().count('Вижу цифру: 7'), 3)
         sides = []
         for index in (0, 5, 10):
             shown = show.call_args_list[index].args[1]

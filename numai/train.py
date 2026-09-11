@@ -9,6 +9,7 @@ import numpy as np
 from .data import download, load_split
 from .model import MLP
 from .vision import augment
+from .handwriting import stress_images
 
 
 def evaluate(model, images, labels):
@@ -44,7 +45,8 @@ def train(args):
         training_indices = training_indices[:args.limit]
     training_images, training_labels = images[training_indices], labels[training_indices]
     validation_images, validation_labels = images[validation_indices], labels[validation_indices]
-    model = MLP(seed=args.seed)
+    stress_validation = stress_images(validation_images)
+    model = MLP((784, 256, 128, 10), seed=args.seed)
     initial = evaluate(model, validation_images, validation_labels)['accuracy']
     print(f'До обучения: {initial:.2%}. Обучение: {len(training_indices)}; валидация: 5000.', flush=True)
     best = -1
@@ -63,24 +65,34 @@ def train(args):
                 raise ValueError('Обучение стало неустойчивым. Попробуйте меньший --lr.')
             total_loss += loss * len(indices)
         accuracy = evaluate(model, validation_images, validation_labels)['accuracy']
-        row = {'epoch': epoch, 'loss': total_loss/len(training_images), 'validation_accuracy': accuracy}
+        stress_accuracy = evaluate(model, stress_validation, validation_labels)['accuracy']
+        selection_score = (accuracy + stress_accuracy) / 2
+        row = {'epoch': epoch, 'loss': total_loss/len(training_images), 'validation_accuracy': accuracy,
+               'handwriting_validation_accuracy': stress_accuracy, 'selection_score': selection_score}
         history.append(row)
-        if accuracy > best:
-            best, best_epoch = accuracy, epoch
+        if selection_score > best:
+            best, best_epoch = selection_score, epoch
             model.save(args.model, {'alphabet': 'arabic-0-9', 'seed': args.seed,
-                                   'epoch': epoch, 'validation_accuracy': best,
+                                   'epoch': epoch, 'validation_accuracy': accuracy,
+                                   'handwriting_validation_accuracy': stress_accuracy,
+                                   'augmentation': 'marker-messy-elastic-v3',
                                    'preprocessing': 'center-mass-20-in-28-v1'})
-        print(f'Эпоха {epoch:02}/{args.epochs}: ошибка={row["loss"]:.4f}, валидация={accuracy:.2%}', flush=True)
+        print(f'Эпоха {epoch:02}/{args.epochs}: ошибка={row["loss"]:.4f}, валидация={accuracy:.2%}, почерк={stress_accuracy:.2%}', flush=True)
     # Тестовая выборка открывается после выбора лучших весов по валидации.
     test_images, test_labels = load_split(args.data, train=False)
     test_metrics = evaluate(MLP.load(args.model), test_images, test_labels)
+    stress_metrics = evaluate(MLP.load(args.model), stress_images(test_images), test_labels)
     report = {
         'architecture': list(model.sizes), 'seed': args.seed,
         'trained_from_random_weights': True, 'dataset': 'MNIST',
         'training_samples': len(training_images), 'validation_samples': 5000,
         'initial_validation_accuracy': initial, 'best_epoch': best_epoch,
-        'best_validation_accuracy': best, 'epochs': history,
-        'test': test_metrics, 'elapsed_seconds': time.monotonic()-started,
+        'best_validation_accuracy': history[best_epoch-1]['validation_accuracy'],
+        'best_handwriting_validation_accuracy': history[best_epoch-1]['handwriting_validation_accuracy'],
+        'selection': 'mean of clean and fixed handwriting validation accuracy',
+        'best_selection_score': best, 'epochs': history,
+        'test': test_metrics, 'handwriting_test': stress_metrics,
+        'elapsed_seconds': time.monotonic()-started,
         'note': 'MNIST accuracy does not measure live camera accuracy.',
     }
     report_path = args.model.with_suffix('.metrics.json')

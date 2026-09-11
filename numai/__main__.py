@@ -5,11 +5,10 @@ from urllib.error import URLError
 
 import cv2
 
-from .camera import classify, run_camera
+from .camera import recognize_frame, run_camera
 from .data import download, load_split
 from .model import MLP
 from .train import evaluate, train
-from .vision import extract_digit
 
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -33,7 +32,7 @@ def main():
     parser = argparse.ArgumentParser(description='NumAI: собственная модель для арабских цифр 0–9')
     commands = parser.add_subparsers(dest='command', required=True)
     training = commands.add_parser('train', help='Обучить модель со случайных весов на MNIST')
-    training.add_argument('--epochs', type=positive_int, default=15)
+    training.add_argument('--epochs', type=positive_int, default=30)
     training.add_argument('--batch-size', type=positive_int, default=128)
     training.add_argument('--lr', type=probability, default=0.001)
     training.add_argument('--seed', type=int, default=42)
@@ -45,7 +44,7 @@ def main():
     camera.add_argument('--stable-frames', type=positive_int, default=5)
     camera.add_argument('--no-preview', action='store_true', help='Только терминал, без окна изображения')
     camera.add_argument('--max-frames', type=positive_int, default=0, help='Остановиться после N кадров')
-    image = commands.add_parser('image', help='Распознать цифру на светлом изображении без камеры')
+    image = commands.add_parser('image', help='Найти цифры на изображении без камеры')
     image.add_argument('path', type=Path)
     for command in (training, testing, camera, image):
         command.add_argument('--model', type=Path, default=ROOT/'models'/'arabic.npz')
@@ -72,9 +71,14 @@ def main():
             frame = cv2.imread(str(args.path))
             if frame is None:
                 raise ValueError('Не удалось прочитать изображение: ' + str(args.path))
-            number, score = classify(model, extract_digit(frame), args.threshold)
-            print('Цифра не найдена или модель не уверена.' if number is None
-                  else f'Вижу цифру: {number} (оценка модели: {score:.0%})')
+            readings = recognize_frame(model, frame, args.threshold)
+            accepted = [reading for reading in readings if reading.number is not None]
+            if not accepted:
+                print('Цифра не найдена или модель не уверена.')
+            for reading in accepted:
+                x, y, side = reading.box
+                print(f'Вижу цифру: {reading.number} (оценка модели: {reading.score:.0%}; '
+                      f'x={x}, y={y}, размер={side})')
         else:
             download(args.data)
             images, labels = load_split(args.data, train=False)
