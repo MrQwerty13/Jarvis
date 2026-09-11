@@ -1,60 +1,71 @@
-"""Голосовой режим: одно стабильное число с камеры NumAI."""
+"""Запуск NumAI-камеры и озвучка распознанных чисел."""
 
+import re
+import subprocess
 import sys
-import time
 from pathlib import Path
-
-import cv2
-
-from numai.camera import StableTracks, recognize_frame
-from numai.model import MLP
 
 
 ROOT = Path(__file__).resolve().parent.parent
-DEFAULT_MODEL = ROOT / 'models' / 'arabic.npz'
+NUMBER_LINE_RE = re.compile(r'Вижу число:\s*(-?\d+)')
 
 
-def read_number_from_camera(
-    model_path=None,
+def run_numai_camera_session(
     camera_index=0,
+    speak_fn=None,
+    on_number=None,
+    preview=True,
     threshold=0.85,
-    stable_frames=5,
-    timeout_sec=25,
-    preview=False,
 ):
-    path = Path(model_path or DEFAULT_MODEL)
-    if not path.exists():
-        raise FileNotFoundError('Нет весов NumAI. Сначала: python -m numai train')
-    model = MLP.load(path)
-    backend = cv2.CAP_AVFOUNDATION if sys.platform == 'darwin' else cv2.CAP_ANY
-    camera = cv2.VideoCapture(camera_index, backend)
+    """
+    Запускает тот же режим, что и `python -m numai camera`.
+    Парсит stdout и вызывает speak/on_number для каждого нового числа.
+    """
+    command = [
+        sys.executable,
+        '-m',
+        'numai',
+        'camera',
+        '--camera',
+        str(camera_index),
+        '--threshold',
+        str(threshold),
+    ]
+    if not preview:
+        command.append('--no-preview')
+
+    print('Запуск: ' + ' '.join(command), flush=True)
+    process = subprocess.Popen(
+        command,
+        cwd=str(ROOT),
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+        bufsize=1,
+    )
+    spoken = []
     try:
-        if not camera.isOpened():
-            raise RuntimeError('Не удалось открыть камеру для распознавания чисел.')
-        camera.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
-        camera.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
-        stable = StableTracks(stable_frames)
-        deadline = time.monotonic() + timeout_sec
-        while time.monotonic() < deadline:
-            ok, frame = camera.read()
-            if not ok or frame is None:
-                time.sleep(0.05)
+        assert process.stdout is not None
+        for raw in process.stdout:
+            line = raw.rstrip()
+            if line:
+                print(line, flush=True)
+            match = NUMBER_LINE_RE.search(line)
+            if not match:
                 continue
-            readings = recognize_frame(model, frame, threshold)
-            events, _removed = stable.update(readings)
-            if preview:
-                cv2.imshow('Jarvis numbers - Q to quit', frame)
-                if cv2.waitKey(1) & 0xFF in (ord('q'), 27):
-                    break
-            for _track_id, reading in events:
-                if reading.value is not None:
-                    return {
-                        'value': reading.value,
-                        'score': float(reading.score),
-                    }
-            time.sleep(0.08)
+            value = match.group(1)
+            spoken.append(value)
+            phrase = f'Вижу число {value}'
+            if on_number:
+                on_number(value, phrase)
+            if speak_fn:
+                speak_fn(phrase)
     finally:
-        camera.release()
-        if preview:
-            cv2.destroyAllWindows()
-    return None
+        if process.poll() is None:
+            process.terminate()
+            try:
+                process.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                process.kill()
+                process.wait(timeout=5)
+    return spoken

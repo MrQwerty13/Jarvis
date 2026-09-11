@@ -30,17 +30,20 @@ def handle_text(
     camera_index=0,
     router=None,
 ):
+    speak_fn = None if mute_tts else (lambda phrase: speak(phrase, language=language))
     router = router or ActionRouter(
         language=language,
         backend=backend,
         ollama_model=ollama_model,
         ollama_host=ollama_host,
         camera_index=camera_index,
+        speak_fn=speak_fn,
+        mute_tts=mute_tts,
     )
     result = router.handle(text)
     reply = result.get('reply') or ''
     print(f'Джарвис ({result.get("tag")}): {reply}', flush=True)
-    if reply and not mute_tts:
+    if reply and not mute_tts and not result.get('skip_tts'):
         speak(reply, language=language)
     return result
 
@@ -58,12 +61,15 @@ def run_talk(
 ):
     del threshold  # используется только backend=mini внутри ActionRouter/brain
     SetLogLevel(-1)
+    speak_fn = None if mute_tts else (lambda phrase: speak(phrase, language=language))
     router = ActionRouter(
         language=language,
         backend=backend,
         ollama_model=ollama_model,
         ollama_host=ollama_host,
         camera_index=camera_index,
+        speak_fn=speak_fn,
+        mute_tts=mute_tts,
     )
     source_name = 'ollama/' + ollama_model if backend == 'ollama' else 'mini-mlp'
 

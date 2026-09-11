@@ -40,6 +40,8 @@ def run_bridge(
         ollama_model=ollama_model,
         ollama_host=ollama_host,
         camera_index=camera_index,
+        speak_fn=(None if mute_tts else (lambda text: speak(text, language=language))),
+        mute_tts=mute_tts,
     )
     stt_model = Model(str(ensure_model(language)))
     recognizer = KaldiRecognizer(stt_model, SAMPLE_RATE)
