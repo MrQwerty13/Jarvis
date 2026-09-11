@@ -51,17 +51,17 @@ def measure_scenes(model, images, labels):
         for x, y, size, expected in targets:
             matches = [(i, reading) for i, reading in enumerate(readings)
                        if x <= reading.box[0]+reading.box[2]/2 < x+size
-                       and y <= reading.box[1]+reading.box[2]/2 < y+size]
+                       and y <= reading.box[1]+reading.box[3]/2 < y+size]
             if len(matches) != 1:
                 metrics['unanswered'] += 1
                 continue
             index, reading = matches[0]
             used.add(index)
             metrics['localized'] += 1
-            if reading.number is None:
+            if reading.value is None:
                 metrics['unanswered'] += 1
             else:
-                metrics['correct_accepted' if reading.number == expected else 'wrong_accepted'] += 1
+                metrics['correct_accepted' if reading.value == expected else 'wrong_accepted'] += 1
         metrics['extra_candidates'] += len(readings)-len(used)
     return metrics
 

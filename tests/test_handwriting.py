@@ -5,6 +5,7 @@ import numpy as np
 
 from numai.camera import Reading, StableTracks, draw_preview
 from numai.handwriting import STRESS_VARIANTS, stress_images
+from numai.numbers import Symbol
 from numai.vision import augment, normalize_digit
 
 
@@ -33,7 +34,9 @@ class HandwritingTests(unittest.TestCase):
 
 class TrackingTests(unittest.TestCase):
     def reading(self, x, number=7, y=50):
-        return Reading(np.zeros((28, 28), np.float32), (x, y, 80), number, 0.99)
+        box = (x, y, 40, 80)
+        blank = np.zeros((28, 28), np.float32)
+        return Reading(number, box, 0.99, [Symbol(blank, box, number, 0.99)])
 
     def test_same_digit_in_two_places_is_reported_independently(self):
         tracks = StableTracks(frames=3)
@@ -59,7 +62,7 @@ class TrackingTests(unittest.TestCase):
             self.assertEqual(tracks.update([self.reading(30), self.reading(400, None)])[0], [])
         events, _ = tracks.update([self.reading(30), self.reading(400, None)])
         self.assertEqual(len(events), 1)
-        self.assertEqual(events[0][1].number, 7)
+        self.assertEqual(events[0][1].value, 7)
 
     def test_preview_does_not_cover_corner_digit_or_mutate_input(self):
         frame = np.full((480, 640, 3), 255, np.uint8)

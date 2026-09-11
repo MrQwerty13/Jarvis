@@ -48,15 +48,16 @@ class DetectionTests(unittest.TestCase):
         self.assertEqual(len(locate_digits(frame)), 2)
 
     def assert_square_contains(self, box, points, shape):
-        x, y, side = box
-        self.assertGreater(side, 0)
+        x, y, w, h = box
+        self.assertGreater(w, 0)
+        self.assertGreater(h, 0)
         self.assertGreaterEqual(x, 0)
         self.assertGreaterEqual(y, 0)
-        self.assertLessEqual(x + side, shape[1])
-        self.assertLessEqual(y + side, shape[0])
+        self.assertLessEqual(x + w, shape[1])
+        self.assertLessEqual(y + h, shape[0])
         for px, py in points:
-            self.assertTrue(x <= px < x + side)
-            self.assertTrue(y <= py < y + side)
+            self.assertTrue(x <= px < x + w)
+            self.assertTrue(y <= py < y + h)
 
     def test_square_follows_position_and_scale(self):
         sides = []
@@ -68,7 +69,7 @@ class DetectionTests(unittest.TestCase):
                 self.assertIsNotNone(digit)
                 self.assertEqual(digit.shape, (28, 28))
                 self.assert_square_contains(box, [(x, y), (x, y + length)], frame.shape)
-                sides.append(box[2])
+                sides.append(max(box[2], box[3]))
         self.assertLess(sides[0], sides[1])
         self.assertLess(sides[1], sides[2])
 

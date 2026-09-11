@@ -174,21 +174,26 @@ def locate_digits(image):
     detections = []
     for x, y, right, bottom, area, group in components:
         w, h = right-x, bottom-y
-        if h < max(18, min(height, width)*0.025) or max(w, h) > min(height, width)*0.9:
+        aspect = w / max(h, 1)
+        minus_shape = 1.7 <= aspect <= 10.0 and area / max(w * h, 1) >= 0.15
+        min_height = max(4, int(min(height, width) * 0.008)) if minus_shape else max(18, int(min(height, width) * 0.025))
+        if h < min_height or max(w, h) > min(height, width) * 0.9:
             continue
-        if area < 25 or not 0.035 <= w/h <= 1.5 or area/(w*h) < 0.04:
+        if area < 20:
             continue
-        if w/h > 0.3 and area/(w*h) > 0.9:
+        if minus_shape:
+            if h > max(28, int(min(height, width) * 0.12)):
+                continue
+        elif not 0.035 <= aspect <= 1.5 or area / (w * h) < 0.04:
+            continue
+        if not minus_shape and aspect > 0.3 and area / (w * h) > 0.9:
             continue
         # Normalize just this symbol, never other ink inside its display square.
         ink = np.where(np.isin(labels[y:bottom, x:right], group), 255, 0).astype(np.uint8)
         if not _on_paper(gray, background, x, y, right, bottom, ink):
             continue
         digit = normalize_digit(ink)
-        side = min(min(height, width), max(28, int(np.ceil(max(w, h)*1.5))))
-        left = min(max(0, x+w//2-side//2), width-side)
-        top = min(max(0, y+h//2-side//2), height-side)
-        detections.append((digit, (left, top, side)))
+        detections.append((digit, (x, y, w, h)))
     return sorted(detections, key=lambda item: (item[1][1], item[1][0]))
 
 

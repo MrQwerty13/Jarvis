@@ -55,7 +55,7 @@ class TrainedPipelineTests(unittest.TestCase):
         with patch('numai.camera.cv2.VideoCapture', return_value=camera), \
                 patch('numai.camera.time.sleep'), contextlib.redirect_stdout(output):
             run_camera(model, preview=False, max_frames=8)
-        self.assertEqual(output.getvalue().count('Вижу цифру: 7'), 2)
+        self.assertEqual(output.getvalue().count('Вижу число: 7'), 2)
         self.assertIn('объект 1', output.getvalue())
         self.assertIn('объект 2', output.getvalue())
 
@@ -84,8 +84,8 @@ class TrainedPipelineTests(unittest.TestCase):
                 patch('numai.camera.cv2.destroyAllWindows'), \
                 contextlib.redirect_stdout(output):
             run_camera(model, preview=True, max_frames=len(frames))
-        # Large jumps create new tracks; each location must recognize the digit.
-        self.assertEqual(output.getvalue().count('Вижу цифру: 7'), 3)
+        # Large jumps create new tracks; each location must recognize the number.
+        self.assertEqual(output.getvalue().count('Вижу число: 7'), 3)
         sides = []
         for index in (0, 5, 10):
             shown = show.call_args_list[index].args[1]
@@ -93,7 +93,7 @@ class TrainedPipelineTests(unittest.TestCase):
             # The status label is above y=40; remaining green pixels are the box.
             xs, ys = xs[ys > 40], ys[ys > 40]
             self.assertGreater(len(xs), 0)
-            sides.append(int(xs.max() - xs.min()))
+            sides.append(int(max(xs.max() - xs.min(), ys.max() - ys.min())))
         self.assertLess(sides[0], sides[1])
         self.assertLess(sides[1], sides[2])
         camera.release.assert_called_once()
@@ -115,9 +115,29 @@ class TrainedPipelineTests(unittest.TestCase):
         with patch('numai.camera.cv2.VideoCapture', return_value=camera), \
                 patch('numai.camera.time.sleep'), contextlib.redirect_stdout(output):
             run_camera(model, preview=False, max_frames=len(frames))
-        self.assertEqual(output.getvalue().count('Вижу цифру: 7'), 2)
-        self.assertIn('Цифра убрана или не распознана.', output.getvalue())
+        self.assertEqual(output.getvalue().count('Вижу число: 7'), 2)
+        self.assertIn('Число убрано или не распознано.', output.getvalue())
         camera.release.assert_called_once()
+
+    def test_camera_reads_negative_two_digit_number(self):
+        model = MLP.load(ROOT/'models/arabic.npz')
+        images = read_idx(ROOT/'data/mnist/t10k-images-idx3-ubyte.gz')
+        labels = read_idx(ROOT/'data/mnist/t10k-labels-idx1-ubyte.gz')
+        ones = images[np.flatnonzero(labels == 1)]
+        zeros = images[np.flatnonzero(labels == 0)]
+        frame = np.full((480, 640, 3), 255, np.uint8)
+        cv2.line(frame, (140, 220), (210, 220), (0, 0, 0), 10)
+        for left, raw in ((230, ones[0]), (310, zeros[1] if len(zeros) > 1 else zeros[0])):
+            ink = 255 - cv2.resize(raw, (72, 72))
+            frame[176:248, left:left+72] = cv2.cvtColor(ink, cv2.COLOR_GRAY2BGR)
+        camera = MagicMock()
+        camera.isOpened.return_value = True
+        camera.read.side_effect = [(True, frame.copy()) for _ in range(8)]
+        output = io.StringIO()
+        with patch('numai.camera.cv2.VideoCapture', return_value=camera), \
+                patch('numai.camera.time.sleep'), contextlib.redirect_stdout(output):
+            run_camera(model, preview=False, max_frames=8)
+        self.assertIn('Вижу число: -10', output.getvalue())
 
 
 if __name__ == '__main__':
