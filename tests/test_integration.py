@@ -40,6 +40,44 @@ class CameraFailureTests(unittest.TestCase):
                      (ROOT/'data/mnist/t10k-images-idx3-ubyte.gz').exists(),
                      'Сначала обучите локальную модель: python -m numai train')
 class TrainedPipelineTests(unittest.TestCase):
+    def test_camera_finds_moving_off_center_digit_and_resizes_preview(self):
+        model = MLP.load(ROOT/'models/arabic.npz')
+        images = read_idx(ROOT/'data/mnist/t10k-images-idx3-ubyte.gz')
+        labels = read_idx(ROOT/'data/mnist/t10k-labels-idx1-ubyte.gz')
+        raw = images[np.flatnonzero(labels == 7)[0]]
+        frames = []
+        for left, top, size in ((5, 10, 84), (475, 300, 140), (210, 100, 196)):
+            for _ in range(5):
+                frame = np.full((480, 640, 3), 255, np.uint8)
+                ink = 255-cv2.resize(raw, (size, size))
+                frame[top:top+size, left:left+size] = cv2.cvtColor(ink, cv2.COLOR_GRAY2BGR)
+                frames.append(frame)
+        camera = MagicMock()
+        camera.isOpened.return_value = True
+        camera.read.side_effect = [(True, frame) for frame in frames]
+        output = io.StringIO()
+        # Mock only camera/GUI boundaries; use real detection, model, and drawing.
+        with patch('numai.camera.cv2.VideoCapture', return_value=camera), \
+                patch('numai.camera.time.sleep'), \
+                patch('numai.camera.cv2.imshow') as show, \
+                patch('numai.camera.cv2.waitKey', return_value=-1), \
+                patch('numai.camera.cv2.getWindowProperty', return_value=1), \
+                patch('numai.camera.cv2.destroyAllWindows'), \
+                contextlib.redirect_stdout(output):
+            run_camera(model, preview=True, max_frames=len(frames))
+        self.assertEqual(output.getvalue().count('Вижу цифру: 7'), 1)
+        sides = []
+        for index in (0, 5, 10):
+            shown = show.call_args_list[index].args[1]
+            ys, xs = np.where(np.all(shown == (0, 200, 0), axis=2))
+            # The status label is above y=40; remaining green pixels are the box.
+            xs, ys = xs[ys > 40], ys[ys > 40]
+            self.assertGreater(len(xs), 0)
+            sides.append(int(xs.max() - xs.min()))
+        self.assertLess(sides[0], sides[1])
+        self.assertLess(sides[1], sides[2])
+        camera.release.assert_called_once()
+
     def test_camera_replay_recognizes_seven_and_resets_after_blank(self):
         model = MLP.load(ROOT/'models/arabic.npz')
         images = read_idx(ROOT/'data/mnist/t10k-images-idx3-ubyte.gz')

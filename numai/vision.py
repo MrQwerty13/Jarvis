@@ -66,6 +66,55 @@ def extract_digit(image):
     return normalize_digit(ink)
 
 
+def locate_digit(image):
+    """Find one dark digit anywhere in a frame; return (28×28 ink, (x, y, side)).
+
+    Localization is geometric; the existing MLP determines the digit afterwards.
+    Border-connected background is ignored, and competing symbols are rejected.
+    """
+    if image is None or image.size == 0:
+        return None, None
+    gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY) if image.ndim == 3 else image
+    height, width = gray.shape
+    if min(height, width) < 28:
+        return None, None
+    blurred = cv2.GaussianBlur(gray, (5, 5), 0)
+    if int(blurred.max()) - int(blurred.min()) < 25:
+        return None, None
+    _, mask = cv2.threshold(blurred, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
+    count, _, stats, _ = cv2.connectedComponentsWithStats(mask, 8)
+    candidates = []
+    minimum_height = max(18, min(height, width) * 0.035)
+    for label in range(1, count):
+        x, y, w, h, area = map(int, stats[label])
+        if x <= 1 or y <= 1 or x+w >= width-1 or y+h >= height-1:
+            continue
+        if h < minimum_height or max(w, h) > min(height, width) * 0.85:
+            continue
+        if area < 25 or not 0.04 <= w/h <= 1.4 or area/(w*h) < 0.04:
+            continue
+        # A thin solid stroke may be a 1; a broad filled block is background.
+        if w/h > 0.3 and area/(w*h) > 0.9:
+            continue
+        candidates.append((area, label))
+    if not candidates:
+        return None, None
+    candidates.sort(reverse=True)
+    area, label = candidates[0]
+    if len(candidates) > 1 and candidates[1][0] > area * 0.2:
+        return None, None
+    x, y, w, h, _ = map(int, stats[label])
+    side = min(min(height, width), max(28, int(np.ceil(max(w, h) * 1.5))))
+    left = min(max(0, x + w//2 - side//2), width - side)
+    top = min(max(0, y + h//2 - side//2), height - side)
+    # Recheck the local crop: paper edges, shadows, and nearby ink must not
+    # silently enter the network as part of the selected symbol.
+    digit = extract_digit(gray[top:top+side, left:left+side])
+    if digit is None:
+        return None, None
+    return digit, (left, top, side)
+
+
 def augment(images, rng):
     """Небольшие повороты, сдвиги и изменения толщины штриха только при обучении."""
     result = np.empty_like(images)

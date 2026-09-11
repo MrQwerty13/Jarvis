@@ -6,7 +6,7 @@ import time
 import cv2
 import numpy as np
 
-from .vision import extract_digit
+from .vision import locate_digit
 
 
 class StablePrediction:
@@ -57,7 +57,7 @@ def run_camera(model, index=0, threshold=0.85, stable_frames=5, preview=True, ma
         camera.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
         stable = StablePrediction(stable_frames)
         frames = 0
-        print('Камера включена. Покажите одну цифру 0–9 в центре рамки на светлом листе.', flush=True)
+        print('Камера включена. Покажите одну цифру 0–9 на светлом листе в любой части кадра.', flush=True)
         print('Выход: Ctrl+C в терминале или Q / Esc в окне камеры.', flush=True)
         while True:
             started = time.monotonic()
@@ -65,9 +65,7 @@ def run_camera(model, index=0, threshold=0.85, stable_frames=5, preview=True, ma
             if not ok or frame is None:
                 raise RuntimeError('Камера открылась, но кадр не получен. Проверьте устройство и разрешения.')
             height, width = frame.shape[:2]
-            side = int(min(height, width) * 0.65)
-            x, y = (width-side)//2, (height-side)//2
-            digit = extract_digit(frame[y:y+side, x:x+side])
+            digit, box = locate_digit(frame)
             number, score = classify(model, digit, threshold)
             previous = stable.last_output
             output = stable.update(number)
@@ -77,17 +75,20 @@ def run_camera(model, index=0, threshold=0.85, stable_frames=5, preview=True, ma
                 print('Цифра убрана или не распознана.', flush=True)
             if preview:
                 color = (0, 200, 0) if number is not None else (0, 180, 255)
-                cv2.rectangle(frame, (x, y), (x+side, y+side), color, 2)
-                label = f'{number} ({score:.0%})' if number is not None else 'No digit / uncertain'
+                if box is not None:
+                    x, y, side = box
+                    cv2.rectangle(frame, (x, y), (x+side-1, y+side-1), color, 2)
+                label = f'{number} ({score:.0%})' if number is not None else (
+                    'Uncertain digit' if box is not None else 'Searching for one digit...')
                 cv2.putText(frame, label, (15, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, color, 2)
                 processed = np.zeros((28, 28), np.float32) if digit is None else digit
                 thumbnail = cv2.resize((processed*255).astype(np.uint8), (112, 112), interpolation=cv2.INTER_NEAREST)
                 if height >= 162 and width >= 127:
-                    frame[50:162, 15:127] = cv2.cvtColor(thumbnail, cv2.COLOR_GRAY2BGR)
-                cv2.imshow('NumAI - one digit inside the square - Q to quit', frame)
+                    frame[height-127:height-15, 15:127] = cv2.cvtColor(thumbnail, cv2.COLOR_GRAY2BGR)
+                cv2.imshow('NumAI - automatic digit detection - Q to quit', frame)
                 if cv2.waitKey(1) & 0xFF in (ord('q'), 27):
                     break
-                if cv2.getWindowProperty('NumAI - one digit inside the square - Q to quit', cv2.WND_PROP_VISIBLE) < 1:
+                if cv2.getWindowProperty('NumAI - automatic digit detection - Q to quit', cv2.WND_PROP_VISIBLE) < 1:
                     break
             frames += 1
             if max_frames and frames >= max_frames:
