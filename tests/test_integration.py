@@ -46,8 +46,8 @@ class TrainedPipelineTests(unittest.TestCase):
         labels = read_idx(ROOT/'data/mnist/t10k-labels-idx1-ubyte.gz')
         raw = images[np.flatnonzero(labels == 7)[0]]
         frame = np.full((480, 640, 3), 255, np.uint8)
-        for x, y in ((10, 10), (480, 310)):
-            frame[y:y+112, x:x+112] = cv2.cvtColor(255-cv2.resize(raw, (112, 112)), cv2.COLOR_GRAY2BGR)
+        for x, y in ((230, 155), (320, 235)):
+            frame[y:y+90, x:x+90] = cv2.cvtColor(255-cv2.resize(raw, (90, 90)), cv2.COLOR_GRAY2BGR)
         camera = MagicMock()
         camera.isOpened.return_value = True
         camera.read.side_effect = [(True, frame.copy()) for _ in range(8)]
@@ -65,7 +65,7 @@ class TrainedPipelineTests(unittest.TestCase):
         labels = read_idx(ROOT/'data/mnist/t10k-labels-idx1-ubyte.gz')
         raw = images[np.flatnonzero(labels == 7)[0]]
         frames = []
-        for left, top, size in ((5, 10, 84), (475, 300, 140), (210, 100, 196)):
+        for left, top, size in ((230, 150, 84), (300, 150, 100), (240, 220, 110)):
             for _ in range(5):
                 frame = np.full((480, 640, 3), 255, np.uint8)
                 ink = 255-cv2.resize(raw, (size, size))
@@ -126,10 +126,10 @@ class TrainedPipelineTests(unittest.TestCase):
         ones = images[np.flatnonzero(labels == 1)]
         zeros = images[np.flatnonzero(labels == 0)]
         frame = np.full((480, 640, 3), 255, np.uint8)
-        cv2.line(frame, (140, 220), (210, 220), (0, 0, 0), 10)
-        for left, raw in ((230, ones[0]), (310, zeros[1] if len(zeros) > 1 else zeros[0])):
-            ink = 255 - cv2.resize(raw, (72, 72))
-            frame[176:248, left:left+72] = cv2.cvtColor(ink, cv2.COLOR_GRAY2BGR)
+        cv2.line(frame, (245, 235), (270, 235), (0, 0, 0), 6)
+        for left, raw in ((278, ones[0]), (316, zeros[1] if len(zeros) > 1 else zeros[0])):
+            ink = 255 - cv2.resize(raw, (32, 32))
+            frame[219:251, left:left+32] = cv2.cvtColor(ink, cv2.COLOR_GRAY2BGR)
         camera = MagicMock()
         camera.isOpened.return_value = True
         camera.read.side_effect = [(True, frame.copy()) for _ in range(8)]

@@ -19,6 +19,15 @@ from .numbers import (
 from .vision import locate_digits
 
 
+def center_square(frame_shape, fraction=0.30):
+    """Return a centered square ROI covering 30% of the frame width."""
+    height, width = frame_shape[:2]
+    side = max(1, min(width, int(round(width * fraction))))
+    left = (width - side) // 2
+    top = (height - side) // 2
+    return left, top, side, side
+
+
 class StablePrediction:
     def __init__(self, frames=5):
         if frames < 1:
@@ -68,9 +77,16 @@ class Reading:
     symbols: list
 
 
-def recognize_frame(model, frame, threshold=0.85):
+def recognize_frame(model, frame, threshold=0.85, region=None):
+    offset_x = offset_y = 0
+    source = frame
+    if region is not None:
+        offset_x, offset_y, width, height = region
+        source = frame[offset_y:offset_y + height, offset_x:offset_x + width]
     symbols = []
-    for ink, box in locate_digits(frame):
+    for ink, box in locate_digits(source):
+        x, y, width, height = box
+        box = (x + offset_x, y + offset_y, width, height)
         value, score = classify_symbol(model, ink, box, threshold)
         symbols.append(Symbol(ink, box, value, score))
     readings = []
@@ -129,11 +145,16 @@ class StableTracks:
         return events, removed
 
 
-def draw_preview(frame, readings):
+def draw_preview(frame, readings, region=None):
     """Keep diagnostics outside the camera image so no number is covered."""
     height, width = frame.shape[:2]
     preview = np.full((height, width+150, 3), 35, np.uint8)
     preview[:, :width] = frame
+    if region is not None:
+        rx, ry, rw, rh = region
+        cv2.rectangle(preview, (rx, ry), (rx+rw-1, ry+rh-1), (255, 180, 0), 2)
+        cv2.putText(preview, 'LOOK HERE', (rx + 6, max(20, ry + 20)),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 180, 0), 1)
     for index, reading in enumerate(readings):
         x, y, w, h = reading.box
         color = (0, 200, 0) if reading.value is not None else (0, 180, 255)
@@ -174,14 +195,16 @@ def run_camera(model, index=0, threshold=0.85, stable_frames=5, preview=True, ma
             ok, frame = camera.read()
             if not ok or frame is None:
                 raise RuntimeError('Камера открылась, но кадр не получен. Проверьте устройство и разрешения.')
-            readings = recognize_frame(model, frame, threshold)
+            actual_region = center_square(frame.shape)
+            readings = recognize_frame(model, frame, threshold, actual_region)
             events, removed = stable.update(readings)
             for track_id, reading in events:
                 print(f'Вижу число: {reading.value} (оценка модели: {reading.score:.0%}; объект {track_id})', flush=True)
             if removed:
                 print('Число убрано или не распознано.', flush=True)
             if preview:
-                cv2.imshow('NumAI - numbers -100..100 - Q to quit', draw_preview(frame, readings))
+                cv2.imshow('NumAI - numbers -100..100 - Q to quit',
+                           draw_preview(frame, readings, actual_region))
                 if cv2.waitKey(1) & 0xFF in (ord('q'), 27):
                     break
                 if cv2.getWindowProperty('NumAI - numbers -100..100 - Q to quit', cv2.WND_PROP_VISIBLE) < 1:

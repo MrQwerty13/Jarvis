@@ -6,6 +6,7 @@ import urllib.error
 import urllib.request
 
 from .search import format_search_context, web_search
+from .library import DEFAULT_LIBRARY_PATH, LibraryIndex
 
 
 DEFAULT_HOST = 'http://127.0.0.1:11434'
@@ -175,12 +176,16 @@ class OllamaChat:
         self.host = host.rstrip('/')
         self.messages = [{'role': 'system', 'content': SYSTEM_PROMPTS.get(language, SYSTEM_PROMPTS['ru'])}]
         self.tools_supported = True
+        self.session_id = id(self)
+        self.library = LibraryIndex(DEFAULT_LIBRARY_PATH) if DEFAULT_LIBRARY_PATH.exists() else None
 
     def answer(self, text):
         text = (text or '').strip()
         if not text:
             return '', False
-        self.messages.append({'role': 'user', 'content': text})
+        library_context = self._library_context(text)
+        content = text if not library_context else text + '\n\n' + library_context
+        self.messages.append({'role': 'user', 'content': content})
 
         reply_message = {}
         if self.tools_supported:
@@ -239,6 +244,11 @@ class OllamaChat:
                 'коротко по-русски, опираясь на эти факты:\n' + context
             ),
         })
+
+    def _library_context(self, query):
+        if self.library is None:
+            return ''
+        return self.library.context(query)
 
     def _chat(self, messages, tools=False):
         payload = {

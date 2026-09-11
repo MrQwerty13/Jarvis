@@ -4,6 +4,7 @@ import sys
 from .brain import ensure_brain
 from .bridge import run_bridge
 from .listen import run_listener
+from .library import DEFAULT_LIBRARY_PATH, build_library
 from .models import MODELS
 from .ollama_chat import DEFAULT_HOST, DEFAULT_MODEL
 from .talk import handle_text, run_talk
@@ -42,6 +43,10 @@ def main():
     train = commands.add_parser('train', help='Обучить мини-сеть диалога заново')
     train.add_argument('--lang', choices=sorted(MODELS), default='ru')
 
+    library = commands.add_parser('library', help='Индексировать локальные документы (.txt/.md/.pdf)')
+    library.add_argument('--path', required=True, help='Папка с книгами, на которые у вас есть права')
+    library.add_argument('--output', default=str(DEFAULT_LIBRARY_PATH), help='Путь JSON-индекса')
+
     once = commands.add_parser('once', help='Один текстовый запрос → ответ (+ голос)')
     add_common_flags(once)
     once.add_argument('--text', required=True, help='Текст команды без имени')
@@ -60,6 +65,9 @@ def main():
             run_listener(language=args.lang, device=args.device)
         elif command == 'train':
             ensure_brain(language=args.lang, force_train=True)
+        elif command == 'library':
+            count = build_library(args.path, args.output)
+            print(f'Индекс создан: {count} фрагментов, {args.output}')
         elif command == 'once':
             result = handle_text(
                 args.text,

@@ -1,4 +1,5 @@
 import unittest
+import tempfile
 from unittest.mock import patch
 
 import cv2
@@ -6,16 +7,30 @@ import numpy as np
 
 from camai.detectors import count_fingers, detect_faces
 from voice.actions import ActionRouter
+from voice.memory import JsonMemory
 
 
 class FakeBrain:
     def answer(self, text):
-        return 'ответ', False
+        return 'ответ', 'test', 0.99
 
 
 class CamAICommandTests(unittest.TestCase):
     def setUp(self):
-        self.router = ActionRouter(brain=FakeBrain(), mute_tts=True)
+        self.memory_dir = tempfile.TemporaryDirectory()
+        self.router = ActionRouter(backend='mini', brain=FakeBrain(), mute_tts=True,
+                                   memory=JsonMemory(self.memory_dir.name + '/memory.json'))
+
+    def tearDown(self):
+        self.memory_dir.cleanup()
+
+    def test_dialogue_result_is_recalled_without_calling_brain(self):
+        result = self.router.handle('что нового')
+        self.assertEqual(result['reply'], 'ответ')
+        self.router.brain.answer = lambda text: (_ for _ in ()).throw(AssertionError('brain called'))
+        recalled = self.router.handle('  Что   нового  ')
+        self.assertTrue(recalled['memory_hit'])
+        self.assertEqual(recalled['reply'], 'ответ')
 
     def test_open_commands_use_safe_application_allowlist(self):
         with patch('voice.actions.subprocess.Popen') as start:

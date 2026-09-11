@@ -7,7 +7,7 @@ import numpy as np
 
 from numai.model import MLP
 from numai.vision import extract_digit, normalize_digit
-from numai.camera import StablePrediction
+from numai.camera import StablePrediction, center_square
 
 
 class ModelTests(unittest.TestCase):
@@ -82,6 +82,9 @@ class VisionTests(unittest.TestCase):
 
 
 class StabilityTests(unittest.TestCase):
+    def test_camera_region_is_centered_square(self):
+        self.assertEqual(center_square((480, 640)), (224, 144, 192, 192))
+
     def test_requires_consecutive_agreement_and_rearms_after_blank(self):
         stable = StablePrediction(frames=3)
         self.assertIsNone(stable.update(4))

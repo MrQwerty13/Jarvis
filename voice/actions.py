@@ -4,6 +4,7 @@ import re
 import subprocess
 
 from .ollama_chat import ensure_ollama_chat
+from .memory import JsonMemory
 from .vision_number import run_camai_camera_session
 
 
@@ -70,12 +71,15 @@ class ActionRouter:
         brain=None,
         speak_fn=None,
         mute_tts=False,
+        memory=None,
+        memory_path=None,
     ):
         self.language = language
         self.backend = backend
         self.camera_index = camera_index
         self.speak_fn = speak_fn
         self.mute_tts = mute_tts
+        self.memory = memory or JsonMemory(memory_path)
         if brain is not None:
             self.brain = brain
         elif backend == 'ollama':
@@ -96,6 +100,11 @@ class ActionRouter:
             self.speak_fn(text)
 
     def handle(self, text):
+        result = self._handle(text)
+        self.memory.remember(text, result, backend=self.backend)
+        return result
+
+    def _handle(self, text):
         text = (text or '').strip()
         if not text:
             return {'reply': 'Слушаю.', 'done': False, 'tag': 'empty'}
@@ -123,6 +132,15 @@ class ActionRouter:
 
         if is_numbers_command(text):
             return self._handle_numbers()
+
+        remembered = self.memory.recall(text, self.backend)
+        if remembered and self.backend == 'mini':
+            return {
+                'reply': remembered.get('reply', ''),
+                'done': remembered.get('done', False),
+                'tag': remembered.get('tag') or 'memory',
+                'memory_hit': True,
+            }
 
         if self.backend == 'ollama':
             reply, done = self.brain.answer(text)
