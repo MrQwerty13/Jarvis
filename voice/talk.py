@@ -97,7 +97,7 @@ def run_talk(
     print('Jarvis talk mode. Backend: ' + source_name + ', язык: ' + language, flush=True)
     if require_wake:
         print('Нужно обращение: «Джарвис, …»', flush=True)
-    print('Команды: «Ты свободен» — выход; «Распознавание чисел» — камера NumAI.', flush=True)
+    print('Команды: «Ты свободен» — выход; «Джарвис смотри» — camAI; «Джарвис включи VPN».', flush=True)
     print('Говорите. Ctrl+C — выход.', flush=True)
     print('-' * 40, flush=True)
 
@@ -111,7 +111,10 @@ def run_talk(
             callback=callback,
         ):
             while True:
-                data = audio_queue.get()
+                try:
+                    data = audio_queue.get(timeout=0.1)
+                except queue.Empty:
+                    continue
                 if not recognizer.AcceptWaveform(data):
                     continue
                 text = json.loads(recognizer.Result()).get('text', '').strip()

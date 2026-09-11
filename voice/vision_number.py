@@ -10,7 +10,7 @@ ROOT = Path(__file__).resolve().parent.parent
 NUMBER_LINE_RE = re.compile(r'Вижу число:\s*(-?\d+)')
 
 
-def run_numai_camera_session(
+def run_camai_camera_session(
     camera_index=0,
     speak_fn=None,
     on_number=None,
@@ -24,7 +24,7 @@ def run_numai_camera_session(
     command = [
         sys.executable,
         '-m',
-        'numai',
+        'camai',
         'camera',
         '--camera',
         str(camera_index),
@@ -69,3 +69,7 @@ def run_numai_camera_session(
                 process.kill()
                 process.wait(timeout=5)
     return spoken
+
+
+# Backward-compatible name for integrations that used the original NumAI API.
+run_numai_camera_session = run_camai_camera_session
