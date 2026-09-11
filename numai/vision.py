@@ -137,63 +137,84 @@ def locate_digits(image):
     background = cv2.morphologyEx(gray, cv2.MORPH_CLOSE,
                                 np.ones((kernel_size, kernel_size), np.uint8))
     contrast = cv2.subtract(background, gray)
-    # A frame-wide Otsu threshold would hide shadowed digits whenever another
-    # digit is more strongly lit. Contrast is already relative to local paper.
-    # Slightly softer cutoff keeps faint marker edges; a tiny close joins dashed ink.
-    mask = np.where(contrast > 20, 255, 0).astype(np.uint8)
-    mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, np.ones((3, 3), np.uint8))
-    count, labels, stats, _ = cv2.connectedComponentsWithStats(mask, 8)
-    components = []
-    for label in range(1, count):
-        x, y, w, h, area = map(int, stats[label])
-        if area < 12 or x <= 1 or y <= 1 or x+w >= width-1 or y+h >= height-1:
-            continue
-        components.append([x, y, x+w, y+h, area, [label]])
-    # Bound work on heavily textured frames before pairwise fragment grouping.
-    components = sorted(components, key=lambda item: item[4], reverse=True)[:128]
-    # Join a pen-lift gap only when pieces overlap horizontally. Side-by-side
-    # digits remain independent even when their display squares overlap.
-    changed = True
-    while changed:
-        changed = False
-        for i, a in enumerate(components):
-            for j in range(i+1, len(components)):
-                b = components[j]
-                overlap = min(a[2], b[2]) - max(a[0], b[0])
-                gap = max(a[1], b[1]) - min(a[3], b[3])
-                total_height = max(a[3], b[3]) - min(a[1], b[1])
-                if overlap >= 0.5 * min(a[2]-a[0], b[2]-b[0]) and 0 <= gap <= 0.12 * total_height:
-                    components[i] = [min(a[0], b[0]), min(a[1], b[1]),
-                                     max(a[2], b[2]), max(a[3], b[3]),
-                                     a[4]+b[4], a[5]+b[5]]
-                    components.pop(j)
-                    changed = True
-                    break
-            if changed:
-                break
-    detections = []
-    for x, y, right, bottom, area, group in components:
-        w, h = right-x, bottom-y
-        aspect = w / max(h, 1)
-        minus_shape = 1.7 <= aspect <= 10.0 and area / max(w * h, 1) >= 0.15
-        min_height = max(4, int(min(height, width) * 0.008)) if minus_shape else max(18, int(min(height, width) * 0.025))
-        if h < min_height or max(w, h) > min(height, width) * 0.9:
-            continue
-        if area < 20:
-            continue
-        if minus_shape:
-            if h > max(28, int(min(height, width) * 0.12)):
+    # No single threshold is reliable for camera frames: exposure changes across
+    # the sheet and glare can split a marker stroke. Keep several complementary
+    # masks and merge their geometric detections below.
+    masks = []
+    for cutoff in (10, 16, 24):
+        mask = np.where(contrast > cutoff, 255, 0).astype(np.uint8)
+        masks.append(cv2.morphologyEx(mask, cv2.MORPH_CLOSE, np.ones((3, 3), np.uint8)))
+    adaptive = cv2.adaptiveThreshold(
+        gray, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY_INV, 31, 7
+    )
+    masks.append(cv2.morphologyEx(adaptive, cv2.MORPH_CLOSE, np.ones((3, 3), np.uint8)))
+
+    candidates = []
+    for mask in masks:
+        count, labels, stats, _ = cv2.connectedComponentsWithStats(mask, 8)
+        components = []
+        for label in range(1, count):
+            x, y, w, h, area = map(int, stats[label])
+            if area < 12 or x <= 1 or y <= 1 or x+w >= width-1 or y+h >= height-1:
                 continue
-        elif not 0.035 <= aspect <= 1.5 or area / (w * h) < 0.04:
-            continue
-        if not minus_shape and aspect > 0.3 and area / (w * h) > 0.9:
-            continue
-        # Normalize just this symbol, never other ink inside its display square.
-        ink = np.where(np.isin(labels[y:bottom, x:right], group), 255, 0).astype(np.uint8)
-        if not _on_paper(gray, background, x, y, right, bottom, ink):
-            continue
-        digit = normalize_digit(ink)
-        detections.append((digit, (x, y, w, h)))
+            components.append([x, y, x+w, y+h, area, [label]])
+        components = sorted(components, key=lambda item: item[4], reverse=True)[:128]
+        # Join vertically broken strokes, while preserving side-by-side digits.
+        changed = True
+        while changed:
+            changed = False
+            for i, first in enumerate(components):
+                for j in range(i+1, len(components)):
+                    second = components[j]
+                    overlap = min(first[2], second[2]) - max(first[0], second[0])
+                    gap = max(first[1], second[1]) - min(first[3], second[3])
+                    total_height = max(first[3], second[3]) - min(first[1], second[1])
+                    if overlap >= 0.5 * min(first[2]-first[0], second[2]-second[0]) and 0 <= gap <= 0.12 * total_height:
+                        components[i] = [min(first[0], second[0]), min(first[1], second[1]),
+                                         max(first[2], second[2]), max(first[3], second[3]),
+                                         first[4]+second[4], first[5]+second[5]]
+                        components.pop(j)
+                        changed = True
+                        break
+                if changed:
+                    break
+        for x, y, right, bottom, area, group in components:
+            w, h = right-x, bottom-y
+            aspect = w / max(h, 1)
+            density = area / max(w * h, 1)
+            minus_shape = 1.7 <= aspect <= 10.0 and density >= 0.15
+            min_height = max(4, int(min(height, width) * 0.008)) if minus_shape else max(18, int(min(height, width) * 0.025))
+            if h < min_height or max(w, h) > min(height, width) * 0.9 or area < 20:
+                continue
+            if minus_shape:
+                if h > max(28, int(min(height, width) * 0.12)):
+                    continue
+            elif not 0.035 <= aspect <= 1.5 or density < 0.04:
+                continue
+            if not minus_shape and aspect > 0.3 and density > 0.9:
+                continue
+            ink = np.where(np.isin(labels[y:bottom, x:right], group), 255, 0).astype(np.uint8)
+            if not _on_paper(gray, background, x, y, right, bottom, ink):
+                continue
+            candidates.append((x, y, right, bottom, area, ink))
+
+    # The same glyph appears in several masks. Deduplicate only strongly
+    # overlapping boxes so neighboring digits remain separate.
+    candidates.sort(key=lambda item: item[4], reverse=True)
+    unique = []
+    for candidate in candidates:
+        x, y, right, bottom, area, ink = candidate
+        duplicate = False
+        for other in unique:
+            ox, oy, oright, obottom = other[:4]
+            intersection = max(0, min(right, oright) - max(x, ox)) * max(0, min(bottom, obottom) - max(y, oy))
+            if intersection / max(min((right-x)*(bottom-y), (oright-ox)*(obottom-oy)), 1) > 0.5:
+                duplicate = True
+                break
+        if not duplicate:
+            unique.append(candidate)
+    detections = [(normalize_digit(ink), (x, y, right-x, bottom-y))
+                  for x, y, right, bottom, _, ink in unique]
     return sorted(detections, key=lambda item: (item[1][1], item[1][0]))
 
 
